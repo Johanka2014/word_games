@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Shake Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: manipulation; /* Prevents double-tap to zoom on mobile */
+        }
+        .grid-cell {
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .grid-cell.selected {
+            transform: scale(0.95);
+            background-color: #4f46e5; /* indigo-600 */
+            color: white;
+            border-color: #4338ca; /* indigo-700 */
+        }
+        .grid-cell.disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+        /* Custom scrollbar for found words */
+        .found-words-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        .found-words-list::-webkit-scrollbar-track {
+            background: #e5e7eb; /* gray-200 */
+            border-radius: 10px;
+        }
+        .found-words-list::-webkit-scrollbar-thumb {
+            background: #9ca3af; /* gray-400 */
+            border-radius: 10px;
+        }
+        .found-words-list::-webkit-scrollbar-thumb:hover {
+            background: #6b7280; /* gray-500 */
+        }
+        /* Shake animation for invalid word */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+        /* Modal styles */
+        .modal-backdrop {
+            transition: opacity 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white antialiased flex items-center justify-center min-h-screen p-4">
+
+    <div id="game-container" class="w-full max-w-4xl mx-auto p-4 md:p-6 bg-slate-800 rounded-2xl shadow-2xl border border-slate-700">
+
+        <!-- Header: Time and Controls -->
+        <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+            <div class="text-center sm:text-left">
+                <span class="text-sm text-slate-400">Time</span>
+                <div id="timer" class="text-4xl font-bold text-indigo-400">01:30</div>
+            </div>
+            <div class="flex gap-2">
+                <button id="new-game-btn" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 focus:ring-offset-slate-800">New Game</button>
+            </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row gap-6">
+
+            <!-- Left Side: Game Grid and Word Input -->
+            <div class="flex-grow lg:w-2/3">
+                <div id="grid-container" class="grid grid-cols-4 gap-2 md:gap-3 mb-4 select-none">
+                    <!-- Letter cells will be generated here -->
+                </div>
+                <div class="bg-slate-900/50 p-3 rounded-lg min-h-[60px] flex items-center justify-center text-2xl md:text-3xl font-bold tracking-widest mb-4 border border-slate-700">
+                    <span id="current-word-display">&nbsp;</span>
+                </div>
+                <div class="flex gap-2">
+                    <button id="clear-btn" class="w-full py-3 bg-slate-600 hover:bg-slate-700 rounded-lg font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 focus:ring-offset-slate-800">Clear</button>
+                    <button id="enter-btn" class="w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2 focus:ring-offset-slate-800">Enter</button>
+                </div>
+            </div>
+
+            <!-- Right Side: Score and Found Words -->
+            <div class="flex-shrink-0 lg:w-1/3 bg-slate-900/50 rounded-lg p-4 border border-slate-700">
+                <div class="flex justify-between items-baseline mb-3">
+                     <h2 class="text-xl font-bold text-slate-300">Found Words</h2>
+                     <div>
+                         <span class="text-sm text-slate-400">Score:</span>
+                         <span id="score" class="text-2xl font-bold text-indigo-400">0</span>
+                     </div>
+                </div>
+                <div class="h-64 lg:h-[calc(100%-4rem)] overflow-y-auto found-words-list pr-2">
+                    <ul id="found-words" class="space-y-1">
+                        <!-- Found words will be listed here -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Game Over Modal -->
+    <div id="game-over-modal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 modal-backdrop hidden opacity-0">
+        <div class="bg-slate-800 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center border border-slate-700">
+            <h2 class="text-3xl font-bold text-indigo-400 mb-2">Time's Up!</h2>
+            <p class="text-slate-300 mb-4">You scored</p>
+            <div id="final-score" class="text-6xl font-bold text-white mb-6">0</div>
+            <button id="play-again-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 focus:ring-offset-slate-800">Play Again</button>
+        </div>
+    </div>
+
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Elements ---
+            const gridContainer = document.getElementById('grid-container');
+            const timerEl = document.getElementById('timer');
+            const scoreEl = document.getElementById('score');
+            const currentWordDisplay = document.getElementById('current-word-display');
+            const foundWordsList = document.getElementById('found-words');
+            const newGameBtn = document.getElementById('new-game-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const enterBtn = document.getElementById('enter-btn');
+            const gameOverModal = document.getElementById('game-over-modal');
+            const finalScoreEl = document.getElementById('final-score');
+            const playAgainBtn = document.getElementById('play-again-btn');
+
+            // --- Game State ---
+            let grid = [];
+            let currentSelection = []; // { letter, row, col, element }
+            let foundWords = new Set();
+            let score = 0;
+            let timer;
+            let timeLeft = 90;
+            let isGameOver = false;
+
+            // --- Game Configuration ---
+            const GRID_SIZE = 4;
+            // A small dictionary for demonstration purposes. In a real app, this would be much larger.
+            const DICTIONARY = new Set(['ACE', 'ACT', 'ADD', 'AGE', 'AGO', 'AID', 'AIM', 'AIR', 'ALE', 'ALL', 'AND', 'ANT', 'ANY', 'APE', 'APT', 'ARC', 'ARE', 'ARM', 'ART', 'ASH', 'ASK', 'ATE', 'AWL', 'BAD', 'BAG', 'BAN', 'BAT', 'BED', 'BEE', 'BEG', 'BET', 'BID', 'BIG', 'BIN', 'BIT', 'BOA', 'BOB', 'BOG', 'BOX', 'BOY', 'BUD', 'BUG', 'BUM', 'BUN', 'BUS', 'BUT', 'BUY', 'BYE', 'CAB', 'CAD', 'CAM', 'CAN', 'CAP', 'CAR', 'CAT', 'CAW', 'CHI', 'COD', 'COG', 'CON', 'COO', 'COP', 'COT', 'COW', 'CRY', 'CUB', 'CUD', 'CUE', 'CUP', 'CUR', 'CUT', 'DAD', 'DAM', 'DAY', 'DEN', 'DEW', 'DID', 'DIE', 'DIG', 'DIM', 'DIN', 'DIP', 'DOG', 'DON', 'DOT', 'DRY', 'DUB', 'DUD', 'DUE', 'DUG', 'DUO', 'DYE', 'EAR', 'EAT', 'EBB', 'EEL', 'EGG', 'EGO', 'ELF', 'ELM', 'END', 'EON', 'ERA', 'ETA', 'EWE', 'EYE', 'FAD', 'FAN', 'FAR', 'FAT', 'FED', 'FEE', 'FEW', 'FIB', 'FIG', 'FIN', 'FIR', 'FIT', 'FIX', 'FLU', 'FLY', 'FOB', 'FOE', 'FOG', 'FOR', 'FOX', 'FRY', 'FUG', 'FUN', 'FUR', 'GAG', 'GAL', 'GAP', 'GAS', 'GAY', 'GEE', 'GEL', 'GEM', 'GET', 'GIG', 'GIN', 'GIP', 'GNU', 'GOO', 'GOT', 'GUM', 'GUN', 'GUT', 'GUY', 'GYM', 'HAD', 'HAG', 'HAM', 'HAS', 'HAT', 'HAY', 'HEM', 'HEN', 'HER', 'HEW', 'HEX', 'HEY', 'HID', 'HIM', 'HIN', 'HIP', 'HIS', 'HIT', 'HOE', 'HOG', 'HOP', 'HOT', 'HOW', 'HUB', 'HUE', 'HUG', 'HUH', 'HUM', 'HUT', 'ICE', 'ICY', 'IGG', 'ILL', 'IMP', 'INK', 'INN', 'ION', 'IRE', 'IRK', 'ITS', 'IVY', 'JAB', 'JAG', 'JAM', 'JAR', 'JAW', 'JAY', 'JET', 'JIG', 'JOB', 'JOG', 'JOT', 'JOW', 'JOY', 'JUG', 'JUT', 'KEG', 'KEN', 'KEY', 'KID', 'KIN', 'KIP', 'KIT', 'LAB', 'LAD', 'LAG', 'LAM', 'LAP', 'LAW', 'LAY', 'LEA', 'LED', 'LEE', 'LEG', 'LET', 'LID', 'LIE', 'LIP', 'LIT', 'LOB', 'LOG', 'LOP', 'LOT', 'LOW', 'LUG', 'LYE', 'MAD', 'MAN', 'MAP', 'MAR', 'MAT', 'MAW', 'MAY', 'MEN', 'MET', 'MEW', 'MID', 'MIG', 'MIL', 'MOB', 'MOD', 'MOL', 'MOM', 'MON', 'MOP', 'MOW', 'MUD', 'MUG', 'MUM', 'NAB', 'NAG', 'NAP', 'NAY', 'NEE', 'NET', 'NEW', 'NIB', 'NIL', 'NIP', 'NIT', 'NOB', 'NOD', 'NOR', 'NOT', 'NOW', 'NUN', 'NUT', 'OAF', 'OAK', 'OAR', 'OAT', 'ODD', 'ODE', 'OFF', 'OFT', 'OHO', 'OIL', 'OLD', 'ONE', 'OPT', 'ORB', 'ORE', 'OWL', 'OWN', 'PAD', 'PAL', 'PAM', 'PAN', 'PAP', 'PAR', 'PAT', 'PAW', 'PAY', 'PEA', 'PEG', 'PEN', 'PEP', 'PER', 'PET', 'PEW', 'PHI', 'PIE', 'PIG', 'PIN', 'PIP', 'PIT', 'PLY', 'POD', 'POI', 'POP', 'POT', 'POW', 'PRO', 'PRY', 'PUB', 'PUD', 'PUG', 'PUN', 'PUP', 'PUS', 'PUT', 'QUO', 'RAD', 'RAG', 'RAM', 'RAN', 'RAP', 'RAT', 'RAW', 'RAY', 'REB', 'RED', 'REF', 'REG', 'REP', 'REV', 'RIB', 'RID', 'RIG', 'RIM', 'RIN', 'RIP', 'ROB', 'ROD', 'ROE', 'ROT', 'ROW', 'RUB', 'RUE', 'RUG', 'RUM', 'RUN', 'RUT', 'RYA', 'RYE', 'SAD', 'SAG', 'SAL', 'SAP', 'SAT', 'SAW', 'SAY', 'SEA', 'SEC', 'SEE', 'SEG', 'SEN', 'SET', 'SEW', 'SEX', 'SHA', 'SHE', 'SHY', 'SIB', 'SIC', 'SIM', 'SIN', 'SIP', 'SIR', 'SIS', 'SIT', 'SKI', 'SLY', 'SOB', 'SOD', 'SOL', 'SON', 'SOP', 'SOT', 'SOW', 'SOY', 'SPA', 'SPY', 'SRI', 'STY', 'SUB', 'SUD', 'SUE', 'SUM', 'SUN', 'SUP', 'TAB', 'TAD', 'TAG', 'TAM', 'TAN', 'TAO', 'TAP', 'TAR', 'TAT', 'TAU', 'TEA', 'TED', 'TEE', 'TEN', 'THE', 'THO', 'THY', 'TIC', 'TIE', 'TIL', 'TIN', 'TIP', 'TOE', 'TOG', 'TOM', 'TON', 'TOO', 'TOP', 'TOR', 'TOT', 'TOW', 'TOY', 'TRY', 'TUB', 'TUG', 'TUI', 'TUM', 'TUN', 'TUT', 'TUX', 'TWO', 'USE', 'VAN', 'VAT', 'VEE', 'VET', 'VIE', 'VIM', 'VOW', 'WAB', 'WAD', 'WAG', 'WAN', 'WAR', 'WAS', 'WAT', 'WAX', 'WAY', 'WEB', 'WED', 'WEE', 'WET', 'WHO', 'WHY', 'WIG', 'WIN', 'WIT', 'WOE', 'WOK', 'WON', 'WOO', 'WOT', 'WOW', 'WRY', 'WYE', 'YAK', 'YAM', 'YAP', 'YAR', 'YAW', 'YEA', 'YEN', 'YEP', 'YES', 'YET', 'YIN', 'YIP', 'YOU', 'YUK', 'ZAG', 'ZAP', 'ZED', 'ZEE', 'ZEN', 'ZIP', 'ZOO', 'GAME', 'CODE', 'PLAY', 'WORD', 'GRID', 'TIME', 'TEST', 'QUIZ', 'SHAKE']);
+
+
+            // --- Letter Distribution for Realistic Grids ---
+            // Based on frequency in English
+            const LETTERS = "AAAAAAAAABBCCDDDDEEEEEEEEEEEEFFGGHHIIIIIIIIIJKLLLLMMNNNNNNOOOOOOOOPPQRRRRRRSSSSSTTTTTTTTUUUUVVWWXYYZ";
+            const a = "AEIOU";
+            const b = "BCDFGHJKLMNPQRSTVWXYZ";
+            const randomVowel = () => a[Math.floor(Math.random() * a.length)];
+            const randomConsonant = () => b[Math.floor(Math.random() * b.length)];
+
+            // --- Core Functions ---
+
+            /**
+             * Initializes or resets the game.
+             */
+            function initGame() {
+                // Reset state
+                isGameOver = false;
+                score = 0;
+                foundWords.clear();
+                currentSelection = [];
+                
+                // Reset UI
+                updateScore();
+                updateCurrentWord();
+                foundWordsList.innerHTML = '';
+                gridContainer.innerHTML = '';
+                
+                // Setup new game
+                generateAndRenderGrid();
+                startTimer(90);
+
+                // Hide modal
+                gameOverModal.classList.add('hidden', 'opacity-0');
+            }
+
+            /**
+             * Generates the letter grid ensuring some vowels.
+             */
+            function generateAndRenderGrid() {
+                grid = [];
+                let letterPool = LETTERS.split('');
+                
+                // Ensure at least 3 vowels
+                let tempGrid = [];
+                for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+                     const randIndex = Math.floor(Math.random() * letterPool.length);
+                     tempGrid.push(letterPool.splice(randIndex, 1)[0]);
+                }
+                
+                let vowelCount = tempGrid.filter(l => 'AEIOU'.includes(l)).length;
+                while (vowelCount < 3) {
+                    let randIndex = Math.floor(Math.random() * tempGrid.length);
+                    if (!'AEIOU'.includes(tempGrid[randIndex])) {
+                        tempGrid[randIndex] = randomVowel();
+                        vowelCount++;
+                    }
+                }
+
+                // Create the grid and render it
+                for (let row = 0; row < GRID_SIZE; row++) {
+                    grid[row] = [];
+                    for (let col = 0; col < GRID_SIZE; col++) {
+                        const letter = tempGrid.pop();
+                        grid[row][col] = letter;
+                        const cell = document.createElement('div');
+                        cell.className = 'grid-cell flex items-center justify-center text-2xl md:text-3xl font-bold bg-slate-700 rounded-lg h-16 md:h-20 cursor-pointer border-2 border-slate-600';
+                        cell.textContent = letter;
+                        cell.dataset.row = row;
+                        cell.dataset.col = col;
+                        cell.addEventListener('click', handleCellClick);
+                        gridContainer.appendChild(cell);
+                    }
+                }
+            }
+
+            /**
+             * Starts the countdown timer.
+             * @param {number} seconds - The duration of the game in seconds.
+             */
+            function startTimer(seconds) {
+                clearInterval(timer);
+                timeLeft = seconds;
+                updateTimerDisplay();
+
+                timer = setInterval(() => {
+                    timeLeft--;
+                    updateTimerDisplay();
+                    if (timeLeft <= 0) {
+                        endGame();
+                    }
+                }, 1000);
+            }
+
+            /**
+             * Ends the game and shows the final score modal.
+             */
+            function endGame() {
+                clearInterval(timer);
+                isGameOver = true;
+                finalScoreEl.textContent = score;
+                gameOverModal.classList.remove('hidden');
+                setTimeout(() => gameOverModal.classList.remove('opacity-0'), 10); // For transition
+            }
+
+
+            /**
+             * Handles a click on a letter cell.
+             * @param {MouseEvent} e - The click event.
+             */
+            function handleCellClick(e) {
+                if (isGameOver) return;
+
+                const cell = e.target;
+                const row = parseInt(cell.dataset.row);
+                const col = parseInt(cell.dataset.col);
+                const letter = grid[row][col];
+
+                // Check if cell is already selected
+                const isSelected = currentSelection.some(sel => sel.row === row && sel.col === col);
+                if (isSelected) return;
+
+                // Check if cell is adjacent to the last selected one
+                const lastSelection = currentSelection[currentSelection.length - 1];
+                if (lastSelection && !isAdjacent(lastSelection, { row, col })) {
+                    return; // Not adjacent
+                }
+
+                // Add to selection
+                currentSelection.push({ letter, row, col, element: cell });
+                cell.classList.add('selected');
+                updateCurrentWord();
+            }
+            
+            /**
+             * Checks if two cells are adjacent (including diagonals).
+             * @param {{row: number, col: number}} cell1 
+             * @param {{row: number, col: number}} cell2 
+             * @returns {boolean}
+             */
+            function isAdjacent(cell1, cell2) {
+                const rowDiff = Math.abs(cell1.row - cell2.row);
+                const colDiff = Math.abs(cell1.col - cell2.col);
+                return rowDiff <= 1 && colDiff <= 1;
+            }
+
+            /**
+             * Handles submitting the current word.
+             */
+            function handleSubmit() {
+                if (isGameOver || currentSelection.length === 0) return;
+
+                const word = currentSelection.map(s => s.letter).join('');
+                
+                if (word.length < 3) {
+                    showInvalidWord();
+                } else if (foundWords.has(word)) {
+                    showInvalidWord();
+                } else if (DICTIONARY.has(word)) {
+                    // Valid word found
+                    foundWords.add(word);
+                    addWordToList(word);
+                    updateScore(calculateWordScore(word));
+                } else {
+                    showInvalidWord();
+                }
+
+                clearSelection();
+            }
+            
+            /**
+             * Triggers a shake animation on the word display for invalid words.
+             */
+            function showInvalidWord() {
+                const display = document.getElementById('current-word-display').parentElement;
+                display.classList.add('shake', 'bg-red-900/50');
+                setTimeout(() => {
+                    display.classList.remove('shake', 'bg-red-900/50');
+                }, 500);
+            }
+
+            /**
+             * Clears the current letter selection.
+             */
+            function clearSelection() {
+                currentSelection.forEach(sel => sel.element.classList.remove('selected'));
+                currentSelection = [];
+                updateCurrentWord();
+            }
+            
+            /**
+             * Adds a found word to the UI list.
+             * @param {string} word - The word that was found.
+             */
+            function addWordToList(word) {
+                const li = document.createElement('li');
+                li.className = 'flex justify-between items-center bg-slate-800 p-2 rounded-md';
+                
+                const wordSpan = document.createElement('span');
+                wordSpan.textContent = word;
+                wordSpan.className = 'font-semibold text-slate-200';
+                
+                const scoreSpan = document.createElement('span');
+                scoreSpan.textContent = `+${calculateWordScore(word)}`;
+                scoreSpan.className = 'text-sm font-bold text-green-400';
+
+                li.appendChild(wordSpan);
+                li.appendChild(scoreSpan);
+                foundWordsList.prepend(li); // Add new words to the top
+            }
+
+            // --- UI Update Functions ---
+            
+            function updateCurrentWord() {
+                if (currentSelection.length > 0) {
+                    currentWordDisplay.textContent = currentSelection.map(s => s.letter).join('');
+                } else {
+                    currentWordDisplay.innerHTML = '&nbsp;'; // Keep height
+                }
+            }
+
+            function updateScore(pointsToAdd = 0) {
+                score += pointsToAdd;
+                scoreEl.textContent = score;
+            }
+
+            function updateTimerDisplay() {
+                const minutes = Math.floor(timeLeft / 60).toString().padStart(2, '0');
+                const seconds = (timeLeft % 60).toString().padStart(2, '0');
+                timerEl.textContent = `${minutes}:${seconds}`;
+            }
+            
+            /**
+             * Calculates score based on word length.
+             * @param {string} word 
+             * @returns {number} The score for the word.
+             */
+            function calculateWordScore(word) {
+                const length = word.length;
+                if (length < 3) return 0;
+                if (length === 3 || length === 4) return 1;
+                if (length === 5) return 2;
+                if (length === 6) return 3;
+                if (length === 7) return 5;
+                return 11; // 8+ letters
+            }
+
+            // --- Event Listeners ---
+            newGameBtn.addEventListener('click', initGame);
+            playAgainBtn.addEventListener('click', initGame);
+            clearBtn.addEventListener('click', clearSelection);
+            enterBtn.addEventListener('click', handleSubmit);
+
+            // --- Initial Game Start ---
+            initGame();
+        });
+    </script>
+</body>
+</html>
